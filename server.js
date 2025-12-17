@@ -61,7 +61,7 @@ function authenticateToken(req, res, next) {
 // Register new user
 app.post('/api/register', async (req, res) => {
     try {
-        const { name, email, phone, password } = req.body;
+        const { name, email, phone, password, adminCode } = req.body;
 
         // Validate input
         if (!name || !email || !phone || !password) {
@@ -90,6 +90,12 @@ app.post('/api/register', async (req, res) => {
             });
         }
 
+        // Determine Role
+        let role = 'user';
+        if (adminCode === 'ADMIN2025') {
+            role = 'admin';
+        }
+
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -100,6 +106,7 @@ app.post('/api/register', async (req, res) => {
             email,
             phone,
             password: hashedPassword,
+            role, // Add role to user object
             createdAt: new Date().toISOString()
         };
 
@@ -108,20 +115,21 @@ app.post('/api/register', async (req, res) => {
 
         // Generate token
         const token = jwt.sign(
-            { id: newUser.id, email: newUser.email, name: newUser.name },
+            { id: newUser.id, email: newUser.email, name: newUser.name, role: newUser.role },
             JWT_SECRET,
             { expiresIn: '24h' }
         );
 
         res.status(201).json({
             success: true,
-            message: 'Đăng ký thành công',
+            message: role === 'admin' ? 'Đăng ký Admin thành công' : 'Đăng ký thành công',
             token,
             user: {
                 id: newUser.id,
                 name: newUser.name,
                 email: newUser.email,
-                phone: newUser.phone
+                phone: newUser.phone,
+                role: newUser.role
             }
         });
 
@@ -169,7 +177,7 @@ app.post('/api/login', async (req, res) => {
 
         // Generate token
         const token = jwt.sign(
-            { id: user.id, email: user.email, name: user.name },
+            { id: user.id, email: user.email, name: user.name, role: user.role || 'user' },
             JWT_SECRET,
             { expiresIn: '24h' }
         );
@@ -182,7 +190,8 @@ app.post('/api/login', async (req, res) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
-                phone: user.phone
+                phone: user.phone,
+                role: user.role || 'user'
             }
         });
 
@@ -213,7 +222,8 @@ app.get('/api/me', authenticateToken, (req, res) => {
             id: user.id,
             name: user.name,
             email: user.email,
-            phone: user.phone
+            phone: user.phone,
+            role: user.role || 'user'
         }
     });
 });
