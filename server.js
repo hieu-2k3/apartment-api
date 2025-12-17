@@ -228,6 +228,70 @@ app.get('/api/me', authenticateToken, (req, res) => {
     });
 });
 
+// File path for storing apartments
+const APARTMENTS_FILE = path.join(__dirname, 'apartments.json');
+
+// Helper function to read apartments from file
+function readApartments() {
+    try {
+        if (fs.existsSync(APARTMENTS_FILE)) {
+            const data = fs.readFileSync(APARTMENTS_FILE, 'utf-8');
+            return JSON.parse(data);
+        }
+    } catch (error) {
+        console.error('Error reading apartments file:', error);
+    }
+    // Default structure if file doesn't exist (can be empty array or initial seed)
+    return [];
+}
+
+// Helper function to write apartments to file
+function writeApartments(data) {
+    try {
+        fs.writeFileSync(APARTMENTS_FILE, JSON.stringify(data, null, 2));
+    } catch (error) {
+        console.error('Error writing apartments file:', error);
+    }
+}
+
+// Middleware to check if user is admin is NOT strictly needed if we trust the frontend logic 
+// but good for security. Let's start simple with just authentication.
+
+// ==================== DATA ROUTES ====================
+
+// Get all apartment data
+app.get('/api/apartments', authenticateToken, (req, res) => {
+    const data = readApartments();
+    res.json({
+        success: true,
+        data: data
+    });
+});
+
+// Save all apartment data (Admin only ideally, but 'authenticated' for now to allow flexible usage)
+app.post('/api/apartments', authenticateToken, (req, res) => {
+    try {
+        const { data } = req.body;
+
+        if (!data) {
+            return res.status(400).json({ success: false, message: 'Dữ liệu không hợp lệ' });
+        }
+
+        // Optional: Check if user is admin
+        // if (req.user.role !== 'admin') return res.status(403).json({ message: 'Forbidden' });
+
+        writeApartments(data);
+
+        res.json({
+            success: true,
+            message: 'Đã lưu dữ liệu thành công'
+        });
+    } catch (error) {
+        console.error('Save data error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server khi lưu dữ liệu' });
+    }
+});
+
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
