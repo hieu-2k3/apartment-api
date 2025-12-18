@@ -277,6 +277,25 @@ app.post('/api/apartments', authenticateToken, async (req, res) => {
     }
 });
 
+// Update Invoice Status
+app.patch('/api/invoices/:id', authenticateToken, async (req, res) => {
+    try {
+        const { status } = req.body;
+        if (!['pending', 'paid'].includes(status)) {
+            return res.status(400).json({ success: false, message: "Trạng thái không hợp lệ" });
+        }
+
+        const invoice = await Invoice.findByIdAndUpdate(req.params.id, { status }, { new: true });
+        if (!invoice) {
+            return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
+        }
+
+        res.json({ success: true, message: "Cập nhật trạng thái thành công", data: invoice });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 // ==================== INVOICE ROUTES ====================
 
 // Get all invoices (Admin) or personal invoices (User)
