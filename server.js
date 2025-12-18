@@ -276,6 +276,30 @@ app.delete('/api/users/:phone', authenticateToken, async (req, res) => {
     }
 });
 
+// Reset toàn bộ hệ thống (Admin only)
+app.post('/api/system/reset', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền này' });
+        }
+
+        // 1. Xóa sạch dữ liệu căn hộ/cư dân
+        await ApartmentData.deleteMany({});
+
+        // 2. Xóa tất cả tài khoản người dùng NGOẠI TRỪ Admin đang thực hiện lệnh này
+        const currentAdminId = req.user.id;
+        await User.deleteMany({ _id: { $ne: currentAdminId } });
+
+        res.json({
+            success: true,
+            message: 'Hệ thống đã được reset sạch sẽ. Tất cả cư dân và tài khoản (ngoại trừ bạn) đã bị xóa vĩnh viễn.'
+        });
+    } catch (error) {
+        console.error('Reset error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server khi reset dữ liệu' });
+    }
+});
+
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
