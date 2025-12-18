@@ -12,9 +12,58 @@ const MONGODB_URI = process.env.MONGODB_URI;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Tăng giới hạn upload lên 50MB
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// MongoDB Connection with improved options and logging
+// ... (existing code)
+
+// ==================== ANNOUNCEMENT ROUTES ====================
+
+const AnnouncementSchema = new mongoose.Schema({
+    title: { type: String, required: true },
+    content: { type: String, required: true },
+    type: { type: String, enum: ['normal', 'urgent', 'event'], default: 'normal' },
+    mediaType: { type: String, enum: ['image', 'video', 'none'], default: 'none' },
+    mediaUrl: { type: String, default: "" }, // Base64 string
+    createdBy: { type: String, default: 'Admin' },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const Announcement = mongoose.model('Announcement', AnnouncementSchema);
+
+// Get all announcements (Public for authenticated users)
+app.get('/api/announcements', authenticateToken, async (req, res) => {
+    try {
+        // Lấy 10 thông báo mới nhất
+        const announcements = await Announcement.find().sort({ createdAt: -1 }).limit(10);
+        res.json({ success: true, data: announcements });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi lấy thông báo' });
+    }
+});
+
+// Create announcement (Admin only)
+app.post('/api/announcements', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền' });
+        }
+
+        const { title, content, type, mediaType, mediaUrl } = req.body;
+        const newAnnouncement = new Announcement({
+            title,
+            content,
+            type: type || 'normal',
+            mediaType: mediaType || 'none',
+            mediaUrl: mediaUrl || ""
+        });
+
+        await newAnnouncement.save();
+        res.status(201).json({ success: true, message: 'Đã tạo thông báo', data: newAnnouncement });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi tạo thông báo' });
+    }
+});
 console.log('⏳ Attempting to connect to MongoDB...');
 if (MONGODB_URI) {
     mongoose.connect(MONGODB_URI)
@@ -569,49 +618,7 @@ app.delete('/api/maintenance/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// ==================== ANNOUNCEMENT ROUTES ====================
 
-const AnnouncementSchema = new mongoose.Schema({
-    title: { type: String, required: true },
-    content: { type: String, required: true },
-    type: { type: String, enum: ['normal', 'urgent', 'event'], default: 'normal' },
-    createdBy: { type: String, default: 'Admin' },
-    createdAt: { type: Date, default: Date.now }
-});
-
-const Announcement = mongoose.model('Announcement', AnnouncementSchema);
-
-// Get all announcements (Public for authenticated users)
-app.get('/api/announcements', authenticateToken, async (req, res) => {
-    try {
-        // Lấy 10 thông báo mới nhất
-        const announcements = await Announcement.find().sort({ createdAt: -1 }).limit(10);
-        res.json({ success: true, data: announcements });
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'Lỗi lấy thông báo' });
-    }
-});
-
-// Create announcement (Admin only)
-app.post('/api/announcements', authenticateToken, async (req, res) => {
-    try {
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({ success: false, message: 'Bạn không có quyền' });
-        }
-
-        const { title, content, type } = req.body;
-        const newAnnouncement = new Announcement({
-            title,
-            content,
-            type: type || 'normal'
-        });
-
-        await newAnnouncement.save();
-        res.status(201).json({ success: true, message: 'Đã tạo thông báo', data: newAnnouncement });
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'Lỗi tạo thông báo' });
-    }
-});
 
 // Delete announcement (Admin only)
 app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
