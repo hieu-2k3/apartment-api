@@ -631,14 +631,78 @@ app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Reset includes announcements
+// ==================== MARKETPLACE ROUTES ====================
+
+const MarketItemSchema = new mongoose.Schema({
+    title: { type: String, required: true },
+    price: { type: Number, required: true },
+    description: String,
+    contactPhone: String,
+    roomName: String,
+    image: String, // Base64
+    createdBy: String, // User ID
+    createdAt: { type: Date, default: Date.now }
+});
+
+const MarketItem = mongoose.model('MarketItem', MarketItemSchema);
+
+// Get all market items
+app.get('/api/market', authenticateToken, async (req, res) => {
+    try {
+        const items = await MarketItem.find().sort({ createdAt: -1 });
+        res.json({ success: true, data: items });
+    } catch (err) {
+        res.status(500).json({ success: false });
+    }
+});
+
+// Post new item
+app.post('/api/market', authenticateToken, async (req, res) => {
+    try {
+        const { title, price, description, contactPhone, image, roomName } = req.body;
+        const newItem = new MarketItem({
+            title,
+            price,
+            description,
+            contactPhone,
+            roomName: roomName || 'Admin',
+            image,
+            createdBy: req.user.id
+        });
+        await newItem.save();
+        res.json({ success: true, message: 'Đã đăng tin thành công' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Lỗi đăng tin' });
+    }
+});
+
+// Delete item (Owner or Admin)
+app.delete('/api/market/:id', authenticateToken, async (req, res) => {
+    try {
+        const item = await MarketItem.findById(req.params.id);
+        if (!item) return res.status(404).json({ success: false });
+
+        // Check permission: Admin or Owner
+        if (req.user.role !== 'admin' && item.createdBy !== req.user.id) {
+            return res.status(403).json({ success: false, message: 'Không có quyền xóa tin này' });
+        }
+
+        await MarketItem.findByIdAndDelete(req.params.id);
+        res.json({ success: true, message: 'Đã xóa tin' });
+    } catch (err) {
+        res.status(500).json({ success: false });
+    }
+});
+
+// Reset includes announcements and market
 app.post('/api/system/reset', authenticateToken, async (req, res) => {
     try {
         if (req.user.role !== 'admin') return res.status(403).json({ success: false });
         await ApartmentData.deleteMany({});
         await Invoice.deleteMany({});
         await Maintenance.deleteMany({});
-        await Announcement.deleteMany({}); // Xóa cả thông báo
+        await Announcement.deleteMany({});
+        await MarketItem.deleteMany({}); // Clear market
         const currentAdminId = req.user.id;
         await User.deleteMany({ _id: { $ne: currentAdminId } });
         res.json({ success: true, message: 'Hệ thống đã được reset sạch sẽ' });
