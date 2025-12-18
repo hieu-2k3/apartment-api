@@ -39,14 +39,19 @@ mongoose.connection.on('disconnected', () => {
 
 const UserSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    phone: { type: String, required: true, unique: true }, // Số điện thoại là duy nhất
-    email: { type: String }, // Email trở thành tùy chọn
+    phone: { type: String, required: true, unique: true },
+    email: { type: String, default: "" },
     password: { type: String, required: true },
     role: { type: String, default: 'user' },
     createdAt: { type: Date, default: Date.now }
 });
 
 const User = mongoose.model('User', UserSchema);
+
+// Tự động dọn dẹp các Index cũ của Email để tránh lỗi khi bỏ trống Email
+User.collection.dropIndex('email_1').catch(() => {
+    // Không sao nếu index này không tồn tại
+});
 
 const ApartmentSchema = new mongoose.Schema({
     data: { type: Array, required: true },
