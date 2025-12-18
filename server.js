@@ -39,8 +39,8 @@ mongoose.connection.on('disconnected', () => {
 
 const UserSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
-    phone: { type: String, required: true },
+    phone: { type: String, required: true, unique: true }, // Số điện thoại là duy nhất
+    email: { type: String }, // Email trở thành tùy chọn
     password: { type: String, required: true },
     role: { type: String, default: 'user' },
     createdAt: { type: Date, default: Date.now }
@@ -78,7 +78,6 @@ function authenticateToken(req, res, next) {
 // Register new user
 app.post('/api/register', async (req, res) => {
     try {
-        // Safe check for DB connection
         if (mongoose.connection.readyState !== 1) {
             return res.status(503).json({
                 success: false,
@@ -88,18 +87,14 @@ app.post('/api/register', async (req, res) => {
 
         const { name, email, phone, password, adminCode } = req.body;
 
-        if (!name || !email || !phone || !password) {
-            return res.status(400).json({ success: false, message: 'Vui lòng điền đầy đủ thông tin' });
+        if (!name || !phone || !password) {
+            return res.status(400).json({ success: false, message: 'Vui lòng điền đầy đủ thông tin (Tên, SĐT, Mật khẩu)' });
         }
 
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            return res.status(400).json({ success: false, message: 'Email không hợp lệ' });
-        }
-
-        const existingUser = await User.findOne({ email });
+        // Kiểm tra số điện thoại đã tồn tại chưa
+        const existingUser = await User.findOne({ phone });
         if (existingUser) {
-            return res.status(400).json({ success: false, message: 'Email đã được sử dụng' });
+            return res.status(400).json({ success: false, message: 'Số điện thoại này đã được đăng ký tài khoản' });
         }
 
         let role = 'user';
@@ -111,7 +106,7 @@ app.post('/api/register', async (req, res) => {
 
         const newUser = new User({
             name,
-            email,
+            email: email || '',
             phone,
             password: hashedPassword,
             role
@@ -120,7 +115,7 @@ app.post('/api/register', async (req, res) => {
         await newUser.save();
 
         const token = jwt.sign(
-            { id: newUser._id, email: newUser.email, name: newUser.name, role: newUser.role },
+            { id: newUser._id, phone: newUser.phone, name: newUser.name, role: newUser.role },
             JWT_SECRET,
             { expiresIn: '24h' }
         );
@@ -132,7 +127,6 @@ app.post('/api/register', async (req, res) => {
             user: {
                 id: newUser._id,
                 name: newUser.name,
-                email: newUser.email,
                 phone: newUser.phone,
                 role: newUser.role
             }
@@ -151,20 +145,24 @@ app.post('/api/login', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Server đang bận, vui lòng thử lại' });
         }
 
-        const { email, password } = req.body;
+        const { phone, password } = req.body;
 
-        const user = await User.findOne({ email });
+        if (!phone || !password) {
+            return res.status(400).json({ success: false, message: 'Vui lòng nhập SĐT và mật khẩu' });
+        }
+
+        const user = await User.findOne({ phone });
         if (!user) {
-            return res.status(401).json({ success: false, message: 'Email hoặc mật khẩu không đúng' });
+            return res.status(401).json({ success: false, message: 'Số điện thoại hoặc mật khẩu không đúng' });
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
-            return res.status(401).json({ success: false, message: 'Email hoặc mật khẩu không đúng' });
+            return res.status(401).json({ success: false, message: 'Số điện thoại hoặc mật khẩu không đúng' });
         }
 
         const token = jwt.sign(
-            { id: user._id, email: user.email, name: user.name, role: user.role || 'user' },
+            { id: user._id, phone: user.phone, name: user.name, role: user.role || 'user' },
             JWT_SECRET,
             { expiresIn: '24h' }
         );
@@ -176,7 +174,6 @@ app.post('/api/login', async (req, res) => {
             user: {
                 id: user._id,
                 name: user.name,
-                email: user.email,
                 phone: user.phone,
                 role: user.role || 'user'
             }
