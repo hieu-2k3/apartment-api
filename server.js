@@ -68,6 +68,31 @@ const ApartmentSchema = new mongoose.Schema({
 
 const ApartmentData = mongoose.model('ApartmentData', ApartmentSchema);
 
+const InvoiceSchema = new mongoose.Schema({
+    roomId: { type: String, required: true },
+    roomName: { type: String, required: true },
+    month: { type: Number, required: true },
+    year: { type: Number, required: true },
+    electricity: {
+        oldValue: { type: Number, default: 0 },
+        newValue: { type: Number, default: 0 },
+        price: { type: Number, default: 3500 }
+    },
+    water: {
+        oldValue: { type: Number, default: 0 },
+        newValue: { type: Number, default: 0 },
+        price: { type: Number, default: 15000 }
+    },
+    serviceFee: { type: Number, default: 100000 },
+    parkingFee: { type: Number, default: 0 },
+    otherFee: { type: Number, default: 0 },
+    totalAmount: { type: Number, required: true },
+    status: { type: String, enum: ['pending', 'paid'], default: 'pending' },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const Invoice = mongoose.model('Invoice', InvoiceSchema);
+
 // Middleware to verify JWT token
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
@@ -252,27 +277,81 @@ app.post('/api/apartments', authenticateToken, async (req, res) => {
     }
 });
 
-// ==================== USER MANAGEMENT ROUTES ====================
+// ==================== INVOICE ROUTES ====================
 
-// Delete user account (Admin only)
-app.delete('/api/users/:phone', authenticateToken, async (req, res) => {
+// Get all invoices (Admin) or personal invoices (User)
+app.get('/api/invoices', authenticateToken, async (req, res) => {
     try {
-        // Chỉ Admin mới có quyền xóa tài khoản
+        let query = {};
         if (req.user.role !== 'admin') {
-            return res.status(403).json({ success: false, message: 'Bạn không có quyền thực hiện hành động này' });
+            // Cư dân chỉ xem được hóa đơn của phòng mình (dựa trên SĐT đăng nhập)
+            // Lưu ý: Sẽ cần logic để khớp roomId của cư dân
+            const phone = req.user.phone;
+            // Tìm phòng có cư dân này
+            const apartmentRecord = await ApartmentData.findOne().sort({ updatedAt: -1 });
+            if (apartmentRecord) {
+                const myRoom = apartmentRecord.data.find(room =>
+                    room.residents && room.residents.some(r => r.phoneLogin === phone)
+                );
+                if (myRoom) {
+                    query = { roomId: myRoom.id };
+                } else {
+                    return res.json({ success: true, data: [] });
+                }
+            }
         }
 
-        const { phone } = req.params;
-        const result = await User.findOneAndDelete({ phone });
-
-        if (result) {
-            res.json({ success: true, message: 'Đã xóa tài khoản người dùng vĩnh viễn' });
-        } else {
-            res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản để xóa' });
-        }
+        const invoices = await Invoice.find(query).sort({ year: -1, month: -1 });
+        res.json({ success: true, data: invoices });
     } catch (error) {
-        console.error('Delete user error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi server khi xóa tài khoản' });
+        res.status(500).json({ success: false, message: 'Lỗi lấy dữ liệu hóa đơn' });
+    }
+});
+
+// Create or Update Invoice (Admin only)
+app.post('/api/invoices', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền' });
+        }
+
+        const invoiceData = req.body;
+        const { roomId, month, year } = invoiceData;
+
+        // Upsert hóa đơn theo Phòng + Tháng + Năm
+        const result = await Invoice.findOneAndUpdate(
+            { roomId, month, year },
+            { ...invoiceData },
+            { upsert: true, new: true }
+        );
+
+        res.json({ success: true, message: 'Đã cập nhật hóa đơn thành công', data: result });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi lưu hóa đơn' });
+    }
+});
+
+// Update status (Admin only)
+app.patch('/api/invoices/:id', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') return res.status(403).json({ success: false });
+
+        const { status } = req.body;
+        await Invoice.findByIdAndUpdate(req.params.id, { status });
+        res.json({ success: true, message: 'Đã cập nhật trạng thái' });
+    } catch (error) {
+        res.status(500).json({ success: false });
+    }
+});
+
+// Delete invoice (Admin only)
+app.delete('/api/invoices/:id', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') return res.status(403).json({ success: false });
+        await Invoice.findByIdAndDelete(req.params.id);
+        res.json({ success: true, message: 'Đã xóa hóa đơn' });
+    } catch (error) {
+        res.status(500).json({ success: false });
     }
 });
 
@@ -297,6 +376,34 @@ app.post('/api/system/reset', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Reset error:', error);
         res.status(500).json({ success: false, message: 'Lỗi server khi reset dữ liệu' });
+    }
+});
+
+// ==================== SYSTEM & USER MANAGEMENT ====================
+
+// Delete user account (Admin only)
+app.delete('/api/users/:phone', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') return res.status(403).json({ success: false });
+        const { phone } = req.params;
+        await User.findOneAndDelete({ phone });
+        res.json({ success: true, message: 'Đã xóa tài khoản' });
+    } catch (error) {
+        res.status(500).json({ success: false });
+    }
+});
+
+// Reset toàn bộ hệ thống (Admin only)
+app.post('/api/system/reset', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') return res.status(403).json({ success: false });
+        await ApartmentData.deleteMany({});
+        await Invoice.deleteMany({}); // Xóa luôn cả hóa đơn khi reset
+        const currentAdminId = req.user.id;
+        await User.deleteMany({ _id: { $ne: currentAdminId } });
+        res.json({ success: true, message: 'Hệ thống đã được reset sạch sẽ' });
+    } catch (error) {
+        res.status(500).json({ success: false });
     }
 });
 
