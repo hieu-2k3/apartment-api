@@ -244,6 +244,30 @@ app.post('/api/apartments', authenticateToken, async (req, res) => {
     }
 });
 
+// ==================== USER MANAGEMENT ROUTES ====================
+
+// Delete user account (Admin only)
+app.delete('/api/users/:phone', authenticateToken, async (req, res) => {
+    try {
+        // Chỉ Admin mới có quyền xóa tài khoản
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền thực hiện hành động này' });
+        }
+
+        const { phone } = req.params;
+        const result = await User.findOneAndDelete({ phone });
+
+        if (result) {
+            res.json({ success: true, message: 'Đã xóa tài khoản người dùng vĩnh viễn' });
+        } else {
+            res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản để xóa' });
+        }
+    } catch (error) {
+        console.error('Delete user error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server khi xóa tài khoản' });
+    }
+});
+
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
