@@ -381,15 +381,54 @@ app.post('/api/system/reset', authenticateToken, async (req, res) => {
 
 // ==================== SYSTEM & USER MANAGEMENT ====================
 
+// Update user account (Admin only)
+app.patch('/api/users/:oldPhone', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền này' });
+        }
+
+        const { oldPhone } = req.params;
+        const { name, phone, email } = req.body;
+
+        // Tìm user theo SĐT cũ
+        const user = await User.findOne({ phone: oldPhone });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản để cập nhật' });
+        }
+
+        // Cập nhật thông tin
+        if (name) user.name = name;
+        if (email !== undefined) user.email = email;
+        if (phone && phone !== oldPhone) {
+            // Kiểm tra SĐT mới đã có ai dùng chưa
+            const phoneExists = await User.findOne({ phone });
+            if (phoneExists) {
+                return res.status(400).json({ success: false, message: 'Số điện thoại mới đã được sử dụng bởi một tài khoản khác' });
+            }
+            user.phone = phone;
+        }
+
+        await user.save();
+        res.json({ success: true, message: 'Đã cập nhật tài khoản thành công', user: { name: user.name, phone: user.phone, email: user.email } });
+    } catch (error) {
+        console.error('Update user error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server khi cập nhật tài khoản' });
+    }
+});
+
 // Delete user account (Admin only)
 app.delete('/api/users/:phone', authenticateToken, async (req, res) => {
     try {
         if (req.user.role !== 'admin') return res.status(403).json({ success: false });
         const { phone } = req.params;
-        await User.findOneAndDelete({ phone });
-        res.json({ success: true, message: 'Đã xóa tài khoản' });
+        const result = await User.findOneAndDelete({ phone });
+        if (!result) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản để xóa' });
+        }
+        res.json({ success: true, message: 'Đã xóa tài khoản thành công' });
     } catch (error) {
-        res.status(500).json({ success: false });
+        res.status(500).json({ success: false, message: 'Lỗi server khi xóa tài khoản' });
     }
 });
 
