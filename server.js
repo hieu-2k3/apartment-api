@@ -18,14 +18,25 @@ app.use(express.json());
 console.log('⏳ Attempting to connect to MongoDB...');
 if (MONGODB_URI) {
     mongoose.connect(MONGODB_URI)
-        .then(() => console.log('✅ Connected to MongoDB Atlas successfully!'))
+        .then(() => {
+            console.log('✅ Connected to MongoDB Atlas successfully!');
+            // Chạy sau khi đã kết nối thành công để tránh lỗi timeout
+            if (mongoose.connection.db) {
+                mongoose.connection.db.collection('users').dropIndex('email_1')
+                    .then(() => console.log('🗑️ Old email index dropped'))
+                    .catch(() => { }); // Vô tư nếu không có index
+            }
+        })
         .catch(err => {
             console.error('❌ MongoDB connection error details:');
             console.error(err);
         });
 } else {
-    console.error('❌ MONGODB_URI is undefined! Check your environment variables.');
+    console.error('❌ MONGODB_URI is undefined!');
 }
+
+// Health Check cho Render
+app.get('/', (req, res) => res.send('API is Live!'));
 
 // Debug connection state
 mongoose.connection.on('error', err => {
@@ -48,10 +59,7 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
-// Tự động dọn dẹp các Index cũ của Email để tránh lỗi khi bỏ trống Email
-User.collection.dropIndex('email_1').catch(() => {
-    // Không sao nếu index này không tồn tại
-});
+// Email index cleanup moved inside connection success above
 
 const ApartmentSchema = new mongoose.Schema({
     data: { type: Array, required: true },
