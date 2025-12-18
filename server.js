@@ -278,33 +278,53 @@ app.post('/api/apartments', authenticateToken, async (req, res) => {
     }
 });
 
-// Update Invoice Status
+// Update Invoice (Admin: all, User: only paymentRequest)
 app.patch('/api/invoices/:id', authenticateToken, async (req, res) => {
     try {
+        const { id } = req.params;
         const { status, paymentRequest } = req.body;
-        const updateData = {};
+        const isAdmin = req.user.role === 'admin';
 
-        if (status) {
-            if (!['pending', 'paid'].includes(status)) {
-                return res.status(400).json({ success: false, message: "Trạng thái không hợp lệ" });
-            }
-            updateData.status = status;
-            // Nếu Admin xác nhận Đã thanh toán, tự động tắt yêu cầu xác nhận của cư dân
-            if (status === 'paid') updateData.paymentRequest = false;
-        }
-
-        if (paymentRequest !== undefined) {
-            updateData.paymentRequest = paymentRequest;
-        }
-
-        const invoice = await Invoice.findByIdAndUpdate(req.params.id, updateData, { new: true });
+        // 1. Check if invoice exists
+        const invoice = await Invoice.findById(id);
         if (!invoice) {
             return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
         }
 
-        res.json({ success: true, message: "Cập nhật thành công", data: invoice });
+        const updateData = {};
+
+        // 2. Logic for Admin
+        if (isAdmin) {
+            if (status) {
+                if (!['pending', 'paid'].includes(status)) {
+                    return res.status(400).json({ success: false, message: "Trạng thái không hợp lệ" });
+                }
+                updateData.status = status;
+                // Nếu Admin xác nhận Đã thanh toán, tự động tắt yêu cầu xác nhận của cư dân
+                if (status === 'paid') updateData.paymentRequest = false;
+            }
+            if (paymentRequest !== undefined) {
+                updateData.paymentRequest = paymentRequest;
+            }
+        }
+        // 3. Logic for Resident (User)
+        else {
+            // Check if this invoice belongs to the resident's room
+            // (Optional security check: search for room matching user's phone)
+            // For now, allow setting paymentRequest only
+            if (paymentRequest !== undefined) {
+                updateData.paymentRequest = paymentRequest;
+            } else if (status) {
+                return res.status(403).json({ success: false, message: "Bạn không có quyền thay đổi trạng thái thanh toán. Vui lòng liên hệ Admin." });
+            }
+        }
+
+        const updatedInvoice = await Invoice.findByIdAndUpdate(id, updateData, { new: true });
+        res.json({ success: true, message: "Cập nhật thành công", data: updatedInvoice });
+
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        console.error("Update Invoice Error:", err);
+        res.status(500).json({ success: false, message: "Lỗi hệ thống khi cập nhật hóa đơn" });
     }
 });
 
@@ -362,18 +382,7 @@ app.post('/api/invoices', authenticateToken, async (req, res) => {
     }
 });
 
-// Update status (Admin only)
-app.patch('/api/invoices/:id', authenticateToken, async (req, res) => {
-    try {
-        if (req.user.role !== 'admin') return res.status(403).json({ success: false });
 
-        const { status } = req.body;
-        await Invoice.findByIdAndUpdate(req.params.id, { status });
-        res.json({ success: true, message: 'Đã cập nhật trạng thái' });
-    } catch (error) {
-        res.status(500).json({ success: false });
-    }
-});
 
 // Delete invoice (Admin only)
 app.delete('/api/invoices/:id', authenticateToken, async (req, res) => {
