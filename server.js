@@ -94,6 +94,23 @@ const InvoiceSchema = new mongoose.Schema({
 
 const Invoice = mongoose.model('Invoice', InvoiceSchema);
 
+const MaintenanceSchema = new mongoose.Schema({
+    roomId: { type: String, required: true },
+    roomName: { type: String, required: true },
+    senderName: { type: String, required: true },
+    phone: { type: String, required: true },
+    title: { type: String, required: true },
+    type: { type: String, enum: ['maintenance', 'feedback'], default: 'maintenance' },
+    description: { type: String, required: true },
+    status: { type: String, enum: ['pending', 'in-progress', 'completed', 'cancelled'], default: 'pending' },
+    priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+    note: { type: String, default: "" }, // Admin note
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+});
+
+const Maintenance = mongoose.model('Maintenance', MaintenanceSchema);
+
 // Middleware to verify JWT token
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
@@ -472,12 +489,93 @@ app.delete('/api/users/:phone', authenticateToken, async (req, res) => {
     }
 });
 
+// ==================== MAINTENANCE & FEEDBACK ROUTES ====================
+
+// Get all requests (Admin) or user requests (User)
+app.get('/api/maintenance', authenticateToken, async (req, res) => {
+    try {
+        let query = {};
+        if (req.user.role !== 'admin') {
+            query = { phone: req.user.phone };
+        }
+        const requests = await Maintenance.find(query).sort({ createdAt: -1 });
+        res.json({ success: true, data: requests });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi lấy dữ liệu phản hồi' });
+    }
+});
+
+// Create new request
+app.post('/api/maintenance', authenticateToken, async (req, res) => {
+    try {
+        const { roomId, roomName, senderName, title, type, description, priority } = req.body;
+
+        const newRequest = new Maintenance({
+            roomId,
+            roomName,
+            senderName,
+            phone: req.user.phone,
+            title,
+            type: type || 'maintenance',
+            description,
+            priority: priority || 'medium'
+        });
+
+        await newRequest.save();
+        res.status(201).json({ success: true, message: 'Gửi yêu cầu thành công', data: newRequest });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi khi gửi yêu cầu' });
+    }
+});
+
+// Update request status (Admin) or content (User)
+app.patch('/api/maintenance/:id', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const isAdmin = req.user.role === 'admin';
+        const maintenance = await Maintenance.findById(id);
+
+        if (!maintenance) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy yêu cầu' });
+        }
+
+        if (!isAdmin && maintenance.phone !== req.user.phone) {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền' });
+        }
+
+        const updates = req.body;
+        updates.updatedAt = new Date();
+
+        // Prevent users from changing status to anything other than cancelled
+        if (!isAdmin && updates.status && updates.status !== 'cancelled') {
+            delete updates.status;
+        }
+
+        const updated = await Maintenance.findByIdAndUpdate(id, updates, { new: true });
+        res.json({ success: true, message: 'Cập nhật thành công', data: updated });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi cập nhật yêu cầu' });
+    }
+});
+
+// Delete request (Admin only)
+app.delete('/api/maintenance/:id', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') return res.status(403).json({ success: false });
+        await Maintenance.findByIdAndDelete(req.params.id);
+        res.json({ success: true, message: 'Đã xóa yêu cầu' });
+    } catch (error) {
+        res.status(500).json({ success: false });
+    }
+});
+
 // Reset toàn bộ hệ thống (Admin only)
 app.post('/api/system/reset', authenticateToken, async (req, res) => {
     try {
         if (req.user.role !== 'admin') return res.status(403).json({ success: false });
         await ApartmentData.deleteMany({});
-        await Invoice.deleteMany({}); // Xóa luôn cả hóa đơn khi reset
+        await Invoice.deleteMany({});
+        await Maintenance.deleteMany({}); // Xóa luôn cả phản hồi khi reset
         const currentAdminId = req.user.id;
         await User.deleteMany({ _id: { $ne: currentAdminId } });
         res.json({ success: true, message: 'Hệ thống đã được reset sạch sẽ' });
