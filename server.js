@@ -71,19 +71,19 @@ const ApartmentData = mongoose.model('ApartmentData', ApartmentSchema);
 const InvoiceSchema = new mongoose.Schema({
     roomId: { type: String, required: true },
     roomName: { type: String, required: true },
+    representativeName: { type: String, default: "" },
+    residentCount: { type: Number, default: 1 },
     month: { type: Number, required: true },
     year: { type: Number, required: true },
+    roomPrice: { type: Number, default: 0 },
     electricity: {
         oldValue: { type: Number, default: 0 },
         newValue: { type: Number, default: 0 },
-        price: { type: Number, default: 3500 }
+        price: { type: Number, default: 2500 }
     },
-    water: {
-        oldValue: { type: Number, default: 0 },
-        newValue: { type: Number, default: 0 },
-        price: { type: Number, default: 15000 }
-    },
-    serviceFee: { type: Number, default: 100000 },
+    waterFee: { type: Number, default: 0 }, // per person calculation
+    internetFee: { type: Number, default: 0 }, // per person calculation
+    serviceFee: { type: Number, default: 0 }, // per person calculation
     parkingFee: { type: Number, default: 0 },
     otherFee: { type: Number, default: 0 },
     totalAmount: { type: Number, required: true },
