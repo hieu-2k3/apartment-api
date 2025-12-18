@@ -569,13 +569,69 @@ app.delete('/api/maintenance/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Reset toàn bộ hệ thống (Admin only)
+// ==================== ANNOUNCEMENT ROUTES ====================
+
+const AnnouncementSchema = new mongoose.Schema({
+    title: { type: String, required: true },
+    content: { type: String, required: true },
+    type: { type: String, enum: ['normal', 'urgent', 'event'], default: 'normal' },
+    createdBy: { type: String, default: 'Admin' },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const Announcement = mongoose.model('Announcement', AnnouncementSchema);
+
+// Get all announcements (Public for authenticated users)
+app.get('/api/announcements', authenticateToken, async (req, res) => {
+    try {
+        // Lấy 10 thông báo mới nhất
+        const announcements = await Announcement.find().sort({ createdAt: -1 }).limit(10);
+        res.json({ success: true, data: announcements });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi lấy thông báo' });
+    }
+});
+
+// Create announcement (Admin only)
+app.post('/api/announcements', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền' });
+        }
+
+        const { title, content, type } = req.body;
+        const newAnnouncement = new Announcement({
+            title,
+            content,
+            type: type || 'normal'
+        });
+
+        await newAnnouncement.save();
+        res.status(201).json({ success: true, message: 'Đã tạo thông báo', data: newAnnouncement });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi tạo thông báo' });
+    }
+});
+
+// Delete announcement (Admin only)
+app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') return res.status(403).json({ success: false });
+        await Announcement.findByIdAndDelete(req.params.id);
+        res.json({ success: true, message: 'Đã xóa thông báo' });
+    } catch (error) {
+        res.status(500).json({ success: false });
+    }
+});
+
+// Reset includes announcements
 app.post('/api/system/reset', authenticateToken, async (req, res) => {
     try {
         if (req.user.role !== 'admin') return res.status(403).json({ success: false });
         await ApartmentData.deleteMany({});
         await Invoice.deleteMany({});
-        await Maintenance.deleteMany({}); // Xóa luôn cả phản hồi khi reset
+        await Maintenance.deleteMany({});
+        await Announcement.deleteMany({}); // Xóa cả thông báo
         const currentAdminId = req.user.id;
         await User.deleteMany({ _id: { $ne: currentAdminId } });
         res.json({ success: true, message: 'Hệ thống đã được reset sạch sẽ' });
