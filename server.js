@@ -88,6 +88,7 @@ const InvoiceSchema = new mongoose.Schema({
     otherFee: { type: Number, default: 0 },
     totalAmount: { type: Number, required: true },
     status: { type: String, enum: ['pending', 'paid'], default: 'pending' },
+    paymentRequest: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -280,17 +281,28 @@ app.post('/api/apartments', authenticateToken, async (req, res) => {
 // Update Invoice Status
 app.patch('/api/invoices/:id', authenticateToken, async (req, res) => {
     try {
-        const { status } = req.body;
-        if (!['pending', 'paid'].includes(status)) {
-            return res.status(400).json({ success: false, message: "Trạng thái không hợp lệ" });
+        const { status, paymentRequest } = req.body;
+        const updateData = {};
+
+        if (status) {
+            if (!['pending', 'paid'].includes(status)) {
+                return res.status(400).json({ success: false, message: "Trạng thái không hợp lệ" });
+            }
+            updateData.status = status;
+            // Nếu Admin xác nhận Đã thanh toán, tự động tắt yêu cầu xác nhận của cư dân
+            if (status === 'paid') updateData.paymentRequest = false;
         }
 
-        const invoice = await Invoice.findByIdAndUpdate(req.params.id, { status }, { new: true });
+        if (paymentRequest !== undefined) {
+            updateData.paymentRequest = paymentRequest;
+        }
+
+        const invoice = await Invoice.findByIdAndUpdate(req.params.id, updateData, { new: true });
         if (!invoice) {
             return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
         }
 
-        res.json({ success: true, message: "Cập nhật trạng thái thành công", data: invoice });
+        res.json({ success: true, message: "Cập nhật thành công", data: invoice });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
