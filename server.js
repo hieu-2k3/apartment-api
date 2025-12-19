@@ -756,13 +756,33 @@ app.get('/api/contracts', authenticateToken, async (req, res) => {
         let query = {};
 
         if (req.user.role !== 'admin') {
-            // Regular users can only see their own contract
-            query.tenantPhone = req.user.phone;
+            // Logic phức tạp hơn cho User thường:
+            // 1. Xem hợp đồng của chính mình (Lịch sử)
+            // 2. Xem hợp đồng ACTIVE của phòng mình đang ở (Roommate view)
+
+            // Tìm xem user đang ở phòng nào
+            const userRoom = await ApartmentData.findOne({
+                "residents.phoneLogin": req.user.phone
+            });
+
+            if (userRoom) {
+                // Nếu User đang ở trong 1 phòng -> Cho phép xem HĐ của mình HOẶC HĐ Active của phòng đó
+                query = {
+                    $or: [
+                        { tenantPhone: req.user.phone },
+                        { roomId: userRoom.id, status: 'active' } // Dùng userRoom.id vì schema ApartmentData id là string (số phòng)
+                    ]
+                };
+            } else {
+                // Nếu chưa gán phòng -> Chỉ xem HĐ của chính mình
+                query = { tenantPhone: req.user.phone };
+            }
         }
 
         const contracts = await Contract.find(query).sort({ createdAt: -1 });
         res.json({ success: true, data: contracts });
     } catch (error) {
+        console.error("Error fetching contracts:", error);
         res.status(500).json({ success: false, message: 'Lỗi lấy danh sách hợp đồng' });
     }
 });
