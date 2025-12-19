@@ -462,29 +462,7 @@ app.delete('/api/invoices/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Reset toàn bộ hệ thống (Admin only)
-app.post('/api/system/reset', authenticateToken, async (req, res) => {
-    try {
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({ success: false, message: 'Bạn không có quyền này' });
-        }
 
-        // 1. Xóa sạch dữ liệu căn hộ/cư dân
-        await ApartmentData.deleteMany({});
-
-        // 2. Xóa tất cả tài khoản người dùng NGOẠI TRỪ Admin đang thực hiện lệnh này
-        const currentAdminId = req.user.id;
-        await User.deleteMany({ _id: { $ne: currentAdminId } });
-
-        res.json({
-            success: true,
-            message: 'Hệ thống đã được reset sạch sẽ. Tất cả cư dân và tài khoản (ngoại trừ bạn) đã bị xóa vĩnh viễn.'
-        });
-    } catch (error) {
-        console.error('Reset error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi server khi reset dữ liệu' });
-    }
-});
 
 // ==================== SYSTEM & USER MANAGEMENT ====================
 
@@ -695,20 +673,35 @@ app.delete('/api/market/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Reset includes announcements and market
+// Reset toàn bộ hệ thống (Toàn diện)
 app.post('/api/system/reset', authenticateToken, async (req, res) => {
     try {
-        if (req.user.role !== 'admin') return res.status(403).json({ success: false });
-        await ApartmentData.deleteMany({});
-        await Invoice.deleteMany({});
-        await Maintenance.deleteMany({});
-        await Announcement.deleteMany({});
-        await MarketItem.deleteMany({}); // Clear market
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền thực hiện hành động này' });
+        }
+
         const currentAdminId = req.user.id;
-        await User.deleteMany({ _id: { $ne: currentAdminId } });
-        res.json({ success: true, message: 'Hệ thống đã được reset sạch sẽ' });
+
+        // Xóa sạch tất cả các bảng dữ liệu
+        await Promise.all([
+            ApartmentData.deleteMany({}),
+            Invoice.deleteMany({}),
+            Maintenance.deleteMany({}),
+            Announcement.deleteMany({}),
+            MarketItem.deleteMany({}),
+            // Xóa tất cả user ngoại trừ admin hiện tại
+            User.deleteMany({ _id: { $ne: currentAdminId } })
+        ]);
+
+        console.log(`System Reset initiated by Admin ID: ${currentAdminId}`);
+
+        res.json({
+            success: true,
+            message: 'Hệ thống đã được dọn dẹp hoàn toàn! Mọi cư dân, hóa đơn, thông báo và bài đăng đã bị xóa. Chỉ tài khoản Admin của bạn được giữ lại.'
+        });
     } catch (error) {
-        res.status(500).json({ success: false });
+        console.error('Full System Reset Error:', error);
+        res.status(500).json({ success: false, message: 'Đã có lỗi xảy ra trong quá trình reset hệ thống' });
     }
 });
 
