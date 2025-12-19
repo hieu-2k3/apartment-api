@@ -946,34 +946,79 @@ app.delete('/api/cleanup-user/:phone', authenticateToken, async (req, res) => {
         }
 
         const rawPhone = req.params.phone;
-        // Chuẩn hóa phone: lấy 9 số cuối (bỏ 0 đầu, bỏ 84 đầu...) để match linh hoạt
-        // Ví dụ: 0987... -> 987...
-        // 84987... -> 987...
-        // Logic đơn giản: Lấy chỉ số (digits), sau đó lấy substring từ cuối lên (9 số cuối)
         const digits = rawPhone.replace(/\D/g, '');
         const corePhone = digits.length > 9 ? digits.slice(-9) : digits;
 
-        console.log(`Admin ${req.user.phone} requesting cleanup for phone: ${rawPhone} (Core: ${corePhone})`);
+        console.log(`Cleanup Request for: ${rawPhone} (Core: ${corePhone})`);
 
-        // 1. Xóa User Account
-        // Tìm user có phone kết thúc bằng corePhone
+        // 1. Identify Contracts to delete
+        const allContracts = await Contract.find({
+            tenantPhone: { $regex: corePhone + '$' }
+        });
+
+        const contractsToDelete = [];
+        let keptActiveContracts = 0;
+
+        // Lấy Building Data một lần để check
+        const buildingDoc = await ApartmentData.findOne().sort({ updatedAt: -1 });
+        const roomsData = buildingDoc ? buildingDoc.data : [];
+
+        for (const contract of allContracts) {
+            if (contract.status !== 'active') {
+                // HĐ cũ/đã hủy -> Xóa luôn
+                contractsToDelete.push(contract._id);
+            } else {
+                // HĐ Active -> Check xem phòng còn ai không
+                let roomHasOtherPeople = false;
+
+                if (roomsData) {
+                    const room = roomsData.find(r => r.id === contract.roomId);
+                    if (room && room.residents && Array.isArray(room.residents)) {
+                        // Logic: ApartmentData chưa được update (vẫn còn user này).
+                        // Nên nếu count > 1 nghĩa là còn người khác.
+                        // Nếu count == 1 (chỉ còn user này) thì coi như trống.
+                        // Tuy nhiên, để an toàn hơn, ta check xem có resident nào KHÁC user này ko.
+                        const otherResidents = room.residents.filter(r => {
+                            const rPhone = (r.phoneLogin || '').replace(/\D/g, '');
+                            return !rPhone.endsWith(corePhone);
+                        });
+
+                        if (otherResidents.length > 0) {
+                            roomHasOtherPeople = true;
+                        }
+                    }
+                }
+
+                if (roomHasOtherPeople) {
+                    console.log(`Keeping active contract ${contract._id} because room ${contract.roomId} has other residents.`);
+                    keptActiveContracts++;
+                } else {
+                    console.log(`Deleting active contract ${contract._id} because room becomes empty.`);
+                    contractsToDelete.push(contract._id);
+                }
+            }
+        }
+
+        // 2. Perform Deletion
         const userDeleteRes = await User.deleteMany({
             phone: { $regex: corePhone + '$' }
         });
 
-        // 2. Xóa Contracts
-        const contractDeleteRes = await Contract.deleteMany({
-            tenantPhone: { $regex: corePhone + '$' }
-        });
-
-        console.log(`Cleanup Result - Users deleted: ${userDeleteRes.deletedCount}, Contracts deleted: ${contractDeleteRes.deletedCount}`);
+        let contractDeleteCount = 0;
+        if (contractsToDelete.length > 0) {
+            const deleteResult = await Contract.deleteMany({
+                _id: { $in: contractsToDelete }
+            });
+            contractDeleteCount = deleteResult.deletedCount;
+        }
 
         res.json({
             success: true,
-            message: `Đã dọn dẹp hệ thống: Xóa ${userDeleteRes.deletedCount} tài khoản và ${contractDeleteRes.deletedCount} hợp đồng liên quan.`,
+            message: `Dọn dẹp xong: Xóa ${userDeleteRes.deletedCount} user, ${contractDeleteCount} hợp đồng. (Giữ lại ${keptActiveContracts} hợp đồng đang Active vì còn người ở).`,
             details: {
                 usersDeleted: userDeleteRes.deletedCount,
-                contractsDeleted: contractDeleteRes.deletedCount
+                contractsDeleted: contractDeleteCount,
+                activeContractsKept: keptActiveContracts
             }
         });
 
