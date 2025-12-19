@@ -161,6 +161,41 @@ const MaintenanceSchema = new mongoose.Schema({
 
 const Maintenance = mongoose.model('Maintenance', MaintenanceSchema);
 
+const ContractSchema = new mongoose.Schema({
+    roomId: { type: String, required: true },
+    roomName: { type: String, required: true },
+    tenantName: { type: String, required: true },
+    tenantPhone: { type: String, required: true },
+    tenantIdCard: { type: String, default: "" },
+
+    // Financial information
+    monthlyRent: { type: Number, required: true },
+    deposit: { type: Number, required: true },
+    depositPaid: { type: Boolean, default: false },
+    depositDate: { type: Date, default: null },
+
+    // Contract duration
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, required: true },
+    duration: { type: Number, required: true }, // in months
+
+    // Status
+    status: { type: String, enum: ['active', 'expired', 'terminated'], default: 'active' },
+
+    // Special terms
+    terms: { type: [String], default: [] },
+
+    // File attachment (base64 or URL)
+    contractFile: { type: String, default: "" },
+
+    // Metadata
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
+    createdBy: { type: String, default: "" }
+});
+
+const Contract = mongoose.model('Contract', ContractSchema);
+
 // Middleware to verify JWT token
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
@@ -713,6 +748,160 @@ app.delete('/api/market/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// ==================== CONTRACT ROUTES ====================
+
+// Get all contracts (Admin) or user's contract (User)
+app.get('/api/contracts', authenticateToken, async (req, res) => {
+    try {
+        let query = {};
+
+        if (req.user.role !== 'admin') {
+            // Regular users can only see their own contract
+            query.tenantPhone = req.user.phone;
+        }
+
+        const contracts = await Contract.find(query).sort({ createdAt: -1 });
+        res.json({ success: true, data: contracts });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi lấy danh sách hợp đồng' });
+    }
+});
+
+// Get contract by room ID
+app.get('/api/contracts/room/:roomId', authenticateToken, async (req, res) => {
+    try {
+        const contract = await Contract.findOne({
+            roomId: req.params.roomId,
+            status: 'active'
+        });
+
+        if (!contract) {
+            return res.json({ success: true, data: null });
+        }
+
+        res.json({ success: true, data: contract });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi lấy hợp đồng' });
+    }
+});
+
+// Create new contract (Admin only)
+app.post('/api/contracts', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Chỉ admin mới có quyền tạo hợp đồng' });
+        }
+
+        const {
+            roomId, roomName, tenantName, tenantPhone, tenantIdCard,
+            monthlyRent, deposit, depositPaid, depositDate,
+            startDate, endDate, duration, terms, contractFile
+        } = req.body;
+
+        // Check if room already has an active contract
+        const existingContract = await Contract.findOne({
+            roomId,
+            status: 'active'
+        });
+
+        if (existingContract) {
+            return res.status(400).json({
+                success: false,
+                message: 'Phòng này đã có hợp đồng đang hoạt động'
+            });
+        }
+
+        const newContract = new Contract({
+            roomId, roomName, tenantName, tenantPhone, tenantIdCard,
+            monthlyRent, deposit, depositPaid,
+            depositDate: depositPaid ? (depositDate || new Date()) : null,
+            startDate, endDate, duration,
+            terms: terms || [],
+            contractFile: contractFile || "",
+            createdBy: req.user.phone
+        });
+
+        await newContract.save();
+        res.status(201).json({
+            success: true,
+            message: 'Đã tạo hợp đồng thành công',
+            data: newContract
+        });
+    } catch (error) {
+        console.error('Error creating contract:', error);
+        res.status(500).json({ success: false, message: 'Lỗi tạo hợp đồng' });
+    }
+});
+
+// Update contract (Admin only)
+app.patch('/api/contracts/:id', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Chỉ admin mới có quyền sửa hợp đồng' });
+        }
+
+        const updates = { ...req.body, updatedAt: new Date() };
+        const contract = await Contract.findByIdAndUpdate(
+            req.params.id,
+            updates,
+            { new: true }
+        );
+
+        if (!contract) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy hợp đồng' });
+        }
+
+        res.json({ success: true, message: 'Đã cập nhật hợp đồng', data: contract });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi cập nhật hợp đồng' });
+    }
+});
+
+// Terminate contract (Admin only)
+app.delete('/api/contracts/:id', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Chỉ admin mới có quyền xóa hợp đồng' });
+        }
+
+        const contract = await Contract.findByIdAndUpdate(
+            req.params.id,
+            { status: 'terminated', updatedAt: new Date() },
+            { new: true }
+        );
+
+        if (!contract) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy hợp đồng' });
+        }
+
+        res.json({ success: true, message: 'Đã kết thúc hợp đồng' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi kết thúc hợp đồng' });
+    }
+});
+
+// Get contracts expiring soon (Admin only)
+app.get('/api/contracts/expiring/:days', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false });
+        }
+
+        const days = parseInt(req.params.days) || 30;
+        const futureDate = new Date();
+        futureDate.setDate(futureDate.getDate() + days);
+
+        const expiringContracts = await Contract.find({
+            status: 'active',
+            endDate: { $lte: futureDate, $gte: new Date() }
+        }).sort({ endDate: 1 });
+
+        res.json({ success: true, data: expiringContracts });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi lấy danh sách hợp đồng sắp hết hạn' });
+    }
+});
+
 // Reset toàn bộ hệ thống (Toàn diện)
 app.post('/api/system/reset', authenticateToken, async (req, res) => {
     try {
@@ -729,6 +918,7 @@ app.post('/api/system/reset', authenticateToken, async (req, res) => {
             Maintenance.deleteMany({}),
             Announcement.deleteMany({}),
             MarketItem.deleteMany({}),
+            Contract.deleteMany({}),
             // Xóa tất cả user ngoại trừ admin hiện tại
             User.deleteMany({ _id: { $ne: currentAdminId } })
         ]);
