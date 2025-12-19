@@ -902,6 +902,51 @@ app.get('/api/contracts/expiring/:days', authenticateToken, async (req, res) => 
     }
 });
 
+// Cleanup User & Related Data (Admin only) - SUPER DELETE
+app.delete('/api/cleanup-user/:phone', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Chỉ admin mới có quyền thực hiện' });
+        }
+
+        const rawPhone = req.params.phone;
+        // Chuẩn hóa phone: lấy 9 số cuối (bỏ 0 đầu, bỏ 84 đầu...) để match linh hoạt
+        // Ví dụ: 0987... -> 987...
+        // 84987... -> 987...
+        // Logic đơn giản: Lấy chỉ số (digits), sau đó lấy substring từ cuối lên (9 số cuối)
+        const digits = rawPhone.replace(/\D/g, '');
+        const corePhone = digits.length > 9 ? digits.slice(-9) : digits;
+
+        console.log(`Admin ${req.user.phone} requesting cleanup for phone: ${rawPhone} (Core: ${corePhone})`);
+
+        // 1. Xóa User Account
+        // Tìm user có phone kết thúc bằng corePhone
+        const userDeleteRes = await User.deleteMany({
+            phone: { $regex: corePhone + '$' }
+        });
+
+        // 2. Xóa Contracts
+        const contractDeleteRes = await Contract.deleteMany({
+            tenantPhone: { $regex: corePhone + '$' }
+        });
+
+        console.log(`Cleanup Result - Users deleted: ${userDeleteRes.deletedCount}, Contracts deleted: ${contractDeleteRes.deletedCount}`);
+
+        res.json({
+            success: true,
+            message: `Đã dọn dẹp hệ thống: Xóa ${userDeleteRes.deletedCount} tài khoản và ${contractDeleteRes.deletedCount} hợp đồng liên quan.`,
+            details: {
+                usersDeleted: userDeleteRes.deletedCount,
+                contractsDeleted: contractDeleteRes.deletedCount
+            }
+        });
+
+    } catch (error) {
+        console.error('Error cleanup user:', error);
+        res.status(500).json({ success: false, message: 'Lỗi dọn dẹp dữ liệu người dùng' });
+    }
+});
+
 // Reset toàn bộ hệ thống (Toàn diện)
 app.post('/api/system/reset', authenticateToken, async (req, res) => {
     try {
