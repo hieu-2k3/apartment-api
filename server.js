@@ -560,6 +560,7 @@ app.delete('/api/users/:phone', authenticateToken, async (req, res) => {
 
 // Get all requests (Admin) or user requests (User)
 app.get('/api/maintenance', authenticateToken, async (req, res) => {
+    console.log(`Maintenance fetch requested by user: ${req.user.phone}, role: ${req.user.role}`);
     try {
         let query = {};
         if (req.user.role !== 'admin') {
