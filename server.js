@@ -756,25 +756,41 @@ app.get('/api/contracts', authenticateToken, async (req, res) => {
         let query = {};
 
         if (req.user.role !== 'admin') {
-            // Logic phức tạp hơn cho User thường:
-            // 1. Xem hợp đồng của chính mình (Lịch sử)
-            // 2. Xem hợp đồng ACTIVE của phòng mình đang ở (Roommate view)
+            // Logic cho User thường:
 
-            // Tìm xem user đang ở phòng nào
-            const userRoom = await ApartmentData.findOne({
-                "residents.phoneLogin": req.user.phone
-            });
+            // 1. Lấy thông tin tòa nhà mới nhất để tìm phòng của user
+            // Vì ApartmentData lưu toàn bộ state trong field 'data' của 1 document
+            const buildingDoc = await ApartmentData.findOne().sort({ updatedAt: -1 });
+            let userRoomId = null;
 
-            if (userRoom) {
-                // Nếu User đang ở trong 1 phòng -> Cho phép xem HĐ của mình HOẶC HĐ Active của phòng đó
+            if (buildingDoc && buildingDoc.data && Array.isArray(buildingDoc.data)) {
+                // Normalize user phone
+                const myPhone = req.user.phone.replace(/\D/g, '');
+
+                // Tìm phòng trong mảng data
+                const foundRoom = buildingDoc.data.find(room =>
+                    room.residents && Array.isArray(room.residents) &&
+                    room.residents.some(r => {
+                        const rPhone = (r.phoneLogin || '').replace(/\D/g, '');
+                        return rPhone === myPhone;
+                    })
+                );
+
+                if (foundRoom) {
+                    userRoomId = foundRoom.id;
+                }
+            }
+
+            if (userRoomId) {
+                // User đang ở trong phòng active -> Xem HĐ chính chủ HOẶC HĐ Active của phòng đó
                 query = {
                     $or: [
                         { tenantPhone: req.user.phone },
-                        { roomId: userRoom.id, status: 'active' } // Dùng userRoom.id vì schema ApartmentData id là string (số phòng)
+                        { roomId: userRoomId, status: 'active' }
                     ]
                 };
             } else {
-                // Nếu chưa gán phòng -> Chỉ xem HĐ của chính mình
+                // Chưa gán phòng -> Chỉ xem chính chủ
                 query = { tenantPhone: req.user.phone };
             }
         }
