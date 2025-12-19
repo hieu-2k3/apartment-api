@@ -55,7 +55,8 @@ app.post('/api/announcements', authenticateToken, async (req, res) => {
             content,
             type: type || 'normal',
             mediaType: mediaType || 'none',
-            mediaUrl: mediaUrl || ""
+            mediaUrl: mediaUrl || "",
+            createdBy: req.user.name || "Admin"
         });
 
         await newAnnouncement.save();
