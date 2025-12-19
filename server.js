@@ -312,6 +312,45 @@ app.get('/api/me', authenticateToken, async (req, res) => {
         res.status(500).json({ success: false, message: 'Lỗi server' });
     }
 });
+// ==================== USER MANAGEMENT ROUTES ====================
+
+// Get all unassigned users (Admin only)
+app.get('/api/users/unassigned', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Chỉ Admin mới có quyền này' });
+        }
+
+        // 1. Lấy tất cả người dùng bình thường
+        const allUsers = await User.find({ role: 'user' }).lean();
+
+        // 2. Lấy dữ liệu tòa nhà hiện tại để xem ai đã có phòng
+        const record = await ApartmentData.findOne().sort({ updatedAt: -1 }).lean();
+
+        if (!record) {
+            return res.json({ success: true, data: allUsers });
+        }
+
+        // Tạo tập hợp các SĐT đã có phòng
+        const assignedPhones = new Set();
+        record.data.forEach(room => {
+            if (room.residents) {
+                room.residents.forEach(res => {
+                    if (res.phoneLogin) assignedPhones.add(res.phoneLogin.trim());
+                    if (res.phone) assignedPhones.add(res.phone.trim());
+                });
+            }
+        });
+
+        // Lọc ra những người dùng chưa có SĐT trong bất kỳ phòng nào
+        const unassignedUsers = allUsers.filter(user => !assignedPhones.has(user.phone.trim()));
+
+        res.json({ success: true, data: unassignedUsers });
+    } catch (error) {
+        console.error('Error fetching unassigned users:', error);
+        res.status(500).json({ success: false, message: 'Lỗi lấy danh sách người dùng' });
+    }
+});
 
 // ==================== DATA ROUTES ====================
 
