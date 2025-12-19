@@ -782,16 +782,28 @@ app.get('/api/contracts', authenticateToken, async (req, res) => {
             }
 
             if (userRoomId) {
-                // User đang ở trong phòng active -> Xem HĐ chính chủ HOẶC HĐ Active của phòng đó
+                // Logic hiển thị nâng cao:
+                // 1. Xem hợp đồng Active của phòng hiện tại (Dành cho cả chủ và roommate)
+                // 2. Xem lịch sử hợp đồng của chính mình (Đã kết thúc/hủy) - Ở bất kỳ phòng nào
+                // 3. Xem hợp đồng của chính mình tại phòng hiện tại (Bao gồm cả đang chờ, active...)
+
+                // NGĂN CHẶN: Xem hợp đồng Active cũ ở phòng khác (khi user đã chuyển phòng nhưng tên vẫn trên HĐ cũ)
                 query = {
                     $or: [
-                        { tenantPhone: req.user.phone },
-                        { roomId: userRoomId, status: 'active' }
+                        { roomId: userRoomId, status: 'active' },
+                        { tenantPhone: req.user.phone, status: { $ne: 'active' } },
+                        { tenantPhone: req.user.phone, roomId: userRoomId }
                     ]
                 };
             } else {
-                // Chưa gán phòng -> Chỉ xem chính chủ
-                query = { tenantPhone: req.user.phone };
+                // Chưa gán phòng -> Chỉ xem HĐ của chính mình nhưng PHẢI KHÔNG ĐƯỢC LÀ ACTIVE của phòng khác?
+                // Nếu chưa gán phòng, logic User chuyển đi (rời P1) -> Thành "chưa gán".
+                // Lúc này User vẫn thấy HĐ Active P1? -> User nói là "Không muốn thấy".
+                // Vậy nếu chưa gán phòng, chỉ cho xem lịch sử (non-active).
+                query = {
+                    tenantPhone: req.user.phone,
+                    status: { $ne: 'active' }
+                };
             }
         }
 
