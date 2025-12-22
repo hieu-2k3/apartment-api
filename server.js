@@ -109,6 +109,61 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
+const OtpSchema = new mongoose.Schema({
+    phone: { type: String, required: true },
+    code: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now, expires: 300 } // Tự động xóa sau 5 phút
+});
+const Otp = mongoose.model('Otp', OtpSchema);
+
+// Endpoint: Gửi mã OTP (Mock)
+app.post('/api/send-otp', async (req, res) => {
+    try {
+        const { phone } = req.body;
+        if (!phone) return res.status(400).json({ success: false, message: 'Thiếu số điện thoại' });
+
+        // Tạo mã 6 số ngẫu nhiên
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // Lưu vào DB (hoặc ghi đè mã cũ của số này)
+        await Otp.findOneAndUpdate(
+            { phone: phone.trim() },
+            { code, createdAt: new Date() },
+            { upsert: true }
+        );
+
+        // Giả lập gửi SMS - Trong thực tế sẽ gọi Twilio/Firebase ở đây
+        console.log(`[SMS Mock] Mã OTP gửi đến ${phone}: ${code}`);
+
+        res.json({
+            success: true,
+            message: 'Mã xác thực đã được gửi!',
+            // Trả về mã luôn để Demo cho dễ (xóa dòng này khi dùng SMS thật)
+            debugCode: code
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi gửi OTP' });
+    }
+});
+
+// Endpoint: Xác thực OTP
+app.post('/api/verify-otp', async (req, res) => {
+    try {
+        const { phone, code } = req.body;
+        const record = await Otp.findOne({ phone: phone.trim(), code: code.trim() });
+
+        if (record) {
+            // Xác thực thành công -> Xóa mã ngay
+            await Otp.deleteOne({ _id: record._id });
+            res.json({ success: true, message: 'Xác thực thành công' });
+        } else {
+            res.status(400).json({ success: false, message: 'Mã xác thực không đúng hoặc đã hết hạn' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi xác thực OTP' });
+    }
+});
+
 // Email index cleanup moved inside connection success above
 
 const ApartmentSchema = new mongoose.Schema({
