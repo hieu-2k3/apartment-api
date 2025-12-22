@@ -326,6 +326,54 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// Reset password (verification via CCCD in apartment record)
+app.post('/api/forgot-password', async (req, res) => {
+    try {
+        const { phone, cccd, newPassword } = req.body;
+
+        if (!phone || !cccd || !newPassword) {
+            return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ SĐT, CCCD và Mật khẩu mới' });
+        }
+
+        // 1. Tìm User
+        const user = await User.findOne({ phone: phone.trim() });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản với số điện thoại này' });
+        }
+
+        // 2. Tìm CCCD trong dữ liệu căn hộ để xác minh danh tính
+        const apartmentRecord = await ApartmentData.findOne().sort({ updatedAt: -1 });
+        let verified = false;
+
+        if (apartmentRecord && apartmentRecord.data) {
+            const foundResident = apartmentRecord.data.some(room =>
+                room.residents && room.residents.some(r =>
+                    r.phoneLogin && r.phoneLogin.trim() === phone.trim() &&
+                    r.cccd && r.cccd.trim() === cccd.trim()
+                )
+            );
+            if (foundResident) verified = true;
+        }
+
+        // Nếu là Admin, cho phép reset bằng mã bí mật hoặc bỏ qua CCCD nếu đã xác thực SĐT? 
+        // Trong trường hợp này, ta giả định CCCD là cách xác thực chính cho cư dân.
+        if (!verified && user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Thông tin xác thực (CCCD) không khớp với dữ liệu cư dân. Vui lòng liên hệ Admin.' });
+        }
+
+        // 3. Cập nhật mật khẩu
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        user.password = hashedPassword;
+        await user.save();
+
+        res.json({ success: true, message: 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.' });
+
+    } catch (error) {
+        console.error('Reset password error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server khi đặt lại mật khẩu' });
+    }
+});
+
 // Get user info
 app.get('/api/me', authenticateToken, async (req, res) => {
     try {
