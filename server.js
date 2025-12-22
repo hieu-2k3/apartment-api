@@ -109,61 +109,6 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', UserSchema);
 
-const OtpSchema = new mongoose.Schema({
-    phone: { type: String, required: true },
-    code: { type: String, required: true },
-    createdAt: { type: Date, default: Date.now, expires: 300 } // Tự động xóa sau 5 phút
-});
-const Otp = mongoose.model('Otp', OtpSchema);
-
-// Endpoint: Gửi mã OTP (Mock)
-app.post('/api/send-otp', async (req, res) => {
-    try {
-        const { phone } = req.body;
-        if (!phone) return res.status(400).json({ success: false, message: 'Thiếu số điện thoại' });
-
-        // Tạo mã 6 số ngẫu nhiên
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-        // Lưu vào DB (hoặc ghi đè mã cũ của số này)
-        await Otp.findOneAndUpdate(
-            { phone: phone.trim() },
-            { code, createdAt: new Date() },
-            { upsert: true }
-        );
-
-        // Giả lập gửi SMS - Trong thực tế sẽ gọi Twilio/Firebase ở đây
-        console.log(`[SMS Mock] Mã OTP gửi đến ${phone}: ${code}`);
-
-        res.json({
-            success: true,
-            message: 'Mã xác thực đã được gửi!',
-            // Trả về mã luôn để Demo cho dễ (xóa dòng này khi dùng SMS thật)
-            debugCode: code
-        });
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'Lỗi gửi OTP' });
-    }
-});
-
-// Endpoint: Xác thực OTP
-app.post('/api/verify-otp', async (req, res) => {
-    try {
-        const { phone, code } = req.body;
-        const record = await Otp.findOne({ phone: phone.trim(), code: code.trim() });
-
-        if (record) {
-            // Xác thực thành công -> Xóa mã ngay
-            await Otp.deleteOne({ _id: record._id });
-            res.json({ success: true, message: 'Xác thực thành công' });
-        } else {
-            res.status(400).json({ success: false, message: 'Mã xác thực không đúng hoặc đã hết hạn' });
-        }
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'Lỗi xác thực OTP' });
-    }
-});
-
 // Email index cleanup moved inside connection success above
 
 const ApartmentSchema = new mongoose.Schema({
@@ -271,41 +216,59 @@ function authenticateToken(req, res, next) {
 
 // ==================== AUTH ROUTES ====================
 
-// Register new user
+// Register new user (Verification via Resident List + CCCD)
 app.post('/api/register', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
-            return res.status(503).json({
-                success: false,
-                message: 'Server đang kết nối cơ sở dữ liệu, vui lòng đợi vài giây rồi thử lại.'
-            });
+            return res.status(503).json({ success: false, message: 'Server đang bận, vui lòng thử lại sau.' });
         }
 
-        const { name, email, phone, password, adminCode } = req.body;
+        const { name, phone, email, password, cccd, adminCode } = req.body;
 
-        if (!name || !phone || !password) {
-            return res.status(400).json({ success: false, message: 'Vui lòng điền đầy đủ thông tin (Tên, SĐT, Mật khẩu)' });
+        if (!name || !phone || !password || !cccd) {
+            return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ: Họ tên, Số điện thoại, CCCD và Mật khẩu' });
         }
 
-        // Kiểm tra số điện thoại đã tồn tại chưa
-        const existingUser = await User.findOne({ phone });
+        // 1. Kiểm tra SĐT đã tồn tại chưa
+        const existingUser = await User.findOne({ phone: phone.trim() });
         if (existingUser) {
             return res.status(400).json({ success: false, message: 'Số điện thoại này đã được đăng ký tài khoản' });
         }
 
-        let role = 'user';
-        if (adminCode === 'ADMIN2025') {
-            role = 'admin';
+        // 2. XÁC THỰC DANH TÍNH CƯ DÂN
+        // Nếu có mã Admin đúng -> Cho phép đăng ký luôn
+        const isAdminRegister = (adminCode === 'ADMIN2025');
+
+        if (!isAdminRegister) {
+            // Kiểm tra trong danh sách căn hộ (ApartmentData) do Admin quản lý
+            const apartmentRecord = await ApartmentData.findOne().sort({ updatedAt: -1 });
+            let found = false;
+
+            if (apartmentRecord && apartmentRecord.data) {
+                found = apartmentRecord.data.some(room =>
+                    room.residents && room.residents.some(r =>
+                        r.phoneLogin && r.phoneLogin.trim() === phone.trim() &&
+                        r.cccd && r.cccd.trim() === cccd.trim()
+                    )
+                );
+            }
+
+            if (!found) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Thông tin SĐT & CCCD không khớp với dữ liệu cư dân của tòa nhà. Vui lòng liên hệ Admin.'
+                });
+            }
         }
 
+        // 3. Tạo tài khoản
         const hashedPassword = await bcrypt.hash(password, 10);
-
         const newUser = new User({
-            name,
-            email: email || '',
-            phone,
+            name: name.trim(),
+            phone: phone.trim(),
+            email: email ? email.trim() : "",
             password: hashedPassword,
-            role
+            role: isAdminRegister ? 'admin' : 'user'
         });
 
         await newUser.save();
@@ -318,14 +281,9 @@ app.post('/api/register', async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: role === 'admin' ? 'Đăng ký Admin thành công' : 'Đăng ký thành công',
+            message: isAdminRegister ? 'Đăng ký Admin thành công' : 'Đăng ký cư dân thành công!',
             token,
-            user: {
-                id: newUser._id,
-                name: newUser.name,
-                phone: newUser.phone,
-                role: newUser.role
-            }
+            user: { id: newUser._id, name: newUser.name, phone: newUser.phone, role: newUser.role }
         });
 
     } catch (error) {
