@@ -216,17 +216,17 @@ function authenticateToken(req, res, next) {
 
 // ==================== AUTH ROUTES ====================
 
-// Register new user (Verification via Resident List + CCCD)
+// Register new user (Simple flow)
 app.post('/api/register', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
             return res.status(503).json({ success: false, message: 'Server đang bận, vui lòng thử lại sau.' });
         }
 
-        const { name, phone, email, password, cccd, adminCode } = req.body;
+        const { name, phone, email, password, adminCode } = req.body;
 
-        if (!name || !phone || !password || !cccd) {
-            return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ: Họ tên, Số điện thoại, CCCD và Mật khẩu' });
+        if (!name || !phone || !password) {
+            return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ: Họ tên, Số điện thoại và Mật khẩu' });
         }
 
         // 1. Kiểm tra SĐT đã tồn tại chưa
@@ -235,31 +235,8 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Số điện thoại này đã được đăng ký tài khoản' });
         }
 
-        // 2. XÁC THỰC DANH TÍNH CƯ DÂN
-        // Nếu có mã Admin đúng -> Cho phép đăng ký luôn
-        const isAdminRegister = (adminCode === 'ADMIN2025');
-
-        if (!isAdminRegister) {
-            // Kiểm tra trong danh sách căn hộ (ApartmentData) do Admin quản lý
-            const apartmentRecord = await ApartmentData.findOne().sort({ updatedAt: -1 });
-            let found = false;
-
-            if (apartmentRecord && apartmentRecord.data) {
-                found = apartmentRecord.data.some(room =>
-                    room.residents && room.residents.some(r =>
-                        r.phoneLogin && r.phoneLogin.trim() === phone.trim() &&
-                        r.cccd && r.cccd.trim() === cccd.trim()
-                    )
-                );
-            }
-
-            if (!found) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Thông tin SĐT & CCCD không khớp với dữ liệu cư dân của tòa nhà. Vui lòng liên hệ Admin.'
-                });
-            }
-        }
+        // 2. Phân loại Role
+        const role = (adminCode === 'ADMIN2025') ? 'admin' : 'user';
 
         // 3. Tạo tài khoản
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -268,7 +245,7 @@ app.post('/api/register', async (req, res) => {
             phone: phone.trim(),
             email: email ? email.trim() : "",
             password: hashedPassword,
-            role: isAdminRegister ? 'admin' : 'user'
+            role: role
         });
 
         await newUser.save();
@@ -281,7 +258,7 @@ app.post('/api/register', async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: isAdminRegister ? 'Đăng ký Admin thành công' : 'Đăng ký cư dân thành công!',
+            message: role === 'admin' ? 'Đăng ký Admin thành công' : 'Đăng ký tài khoản thành công!',
             token,
             user: { id: newUser._id, name: newUser.name, phone: newUser.phone, role: newUser.role }
         });
