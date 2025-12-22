@@ -75,6 +75,19 @@ if (MONGODB_URI) {
                 mongoose.connection.db.collection('users').dropIndex('email_1')
                     .then(() => console.log('🗑️ Old email index dropped'))
                     .catch(() => { }); // Vô tư nếu không có index
+
+                // Migration: Clean all existing phone numbers in User collection
+                const User = mongoose.model('User');
+                User.find({}).then(users => {
+                    users.forEach(async (u) => {
+                        const clean = u.phone.replace(/[\s\.\-\(\)]/g, '');
+                        if (u.phone !== clean) {
+                            u.phone = clean;
+                            await u.save();
+                        }
+                    });
+                    console.log('📱 Phone numbers migration completed');
+                }).catch(err => console.error('Migration error:', err));
             }
         })
         .catch(err => {
@@ -223,14 +236,16 @@ app.post('/api/register', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Server đang bận, vui lòng thử lại sau.' });
         }
 
-        const { name, phone, email, password, adminCode } = req.body;
+        const { name, phone: rawPhone, email, password, adminCode } = req.body;
 
-        if (!name || !phone || !password) {
+        if (!name || !rawPhone || !password) {
             return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ: Họ tên, Số điện thoại và Mật khẩu' });
         }
 
+        const phone = rawPhone.replace(/[\s\.\-\(\)]/g, ''); // Clean phone number
+
         // 1. Kiểm tra SĐT đã tồn tại chưa
-        const existingUser = await User.findOne({ phone: phone.trim() });
+        const existingUser = await User.findOne({ phone: phone });
         if (existingUser) {
             return res.status(400).json({ success: false, message: 'Số điện thoại này đã được đăng ký tài khoản' });
         }
@@ -276,12 +291,13 @@ app.post('/api/login', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Server đang bận, vui lòng thử lại' });
         }
 
-        const { phone, password } = req.body;
+        const { phone: rawPhone, password } = req.body;
 
-        if (!phone || !password) {
+        if (!rawPhone || !password) {
             return res.status(400).json({ success: false, message: 'Vui lòng nhập SĐT và mật khẩu' });
         }
 
+        const phone = rawPhone.replace(/[\s\.\-\(\)]/g, ''); // Clean phone
         const user = await User.findOne({ phone });
         if (!user) {
             return res.status(401).json({ success: false, message: 'Số điện thoại hoặc mật khẩu không đúng' });
@@ -319,14 +335,16 @@ app.post('/api/login', async (req, res) => {
 // Reset password (simple flow)
 app.post('/api/forgot-password', async (req, res) => {
     try {
-        const { phone, newPassword } = req.body;
+        const { phone: rawPhone, newPassword } = req.body;
 
-        if (!phone || !newPassword) {
+        if (!rawPhone || !newPassword) {
             return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ SĐT và Mật khẩu mới' });
         }
 
+        const phone = rawPhone.replace(/[\s\.\-\(\)]/g, ''); // Clean phone
+
         // 1. Tìm User
-        const user = await User.findOne({ phone: phone.trim() });
+        const user = await User.findOne({ phone });
         if (!user) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản với số điện thoại này' });
         }
