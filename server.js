@@ -649,7 +649,7 @@ app.get('/api/maintenance', authenticateToken, async (req, res) => {
 // Create new request
 app.post('/api/maintenance', authenticateToken, async (req, res) => {
     try {
-        const { roomId, roomName, senderName, title, type, description, priority } = req.body;
+        const { roomId, roomName, senderName, title, type, description, priority, mediaUrl, mediaType } = req.body;
 
         const newRequest = new Maintenance({
             roomId,
@@ -659,12 +659,15 @@ app.post('/api/maintenance', authenticateToken, async (req, res) => {
             title,
             type: type || 'maintenance',
             description,
-            priority: priority || 'medium'
+            priority: priority || 'medium',
+            mediaUrl: mediaUrl || '',
+            mediaType: mediaType || ''
         });
 
         await newRequest.save();
         res.status(201).json({ success: true, message: 'Gửi yêu cầu thành công', data: newRequest });
     } catch (error) {
+        console.error('Error creating maintenance request:', error);
         res.status(500).json({ success: false, message: 'Lỗi khi gửi yêu cầu' });
     }
 });
