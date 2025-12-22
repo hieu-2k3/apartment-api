@@ -167,6 +167,8 @@ const MaintenanceSchema = new mongoose.Schema({
     description: { type: String, required: true },
     status: { type: String, enum: ['pending', 'in-progress', 'completed', 'cancelled'], default: 'pending' },
     priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+    mediaUrl: { type: String, default: "" }, // Cloudinary URL for image/video
+    mediaType: { type: String, enum: ['', 'image', 'video'], default: "" }, // Type of media
     note: { type: String, default: "" }, // Admin note
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
