@@ -38,6 +38,7 @@ const Announcement = mongoose.model('Announcement', AnnouncementSchema);
 const MessageSchema = new mongoose.Schema({
     senderId: { type: String, required: true },
     senderName: { type: String, required: true },
+    receiverId: { type: String, default: null }, // null = Public Community
     content: { type: String, required: true },
     createdAt: { type: Date, default: Date.now }
 });
@@ -1131,7 +1132,23 @@ app.post('/api/system/reset', authenticateToken, async (req, res) => {
 
 app.get('/api/messages', authenticateToken, async (req, res) => {
     try {
-        const messages = await Message.find().sort({ createdAt: 1 }).limit(100);
+        const { partnerId } = req.query;
+        let query = {};
+
+        if (partnerId) {
+            // Private Chat: tin nhắn giữa tôi (req.user.id) và partnerId
+            query = {
+                $or: [
+                    { senderId: req.user.id, receiverId: partnerId },
+                    { senderId: partnerId, receiverId: req.user.id }
+                ]
+            };
+        } else {
+            // Public Chat: receiverId is null
+            query = { receiverId: null };
+        }
+
+        const messages = await Message.find(query).sort({ createdAt: 1 }).limit(100);
         res.json({ success: true, data: messages });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Lỗi lấy tin nhắn' });
@@ -1141,27 +1158,60 @@ app.get('/api/messages', authenticateToken, async (req, res) => {
 // ==================== REALTIME SOCKET HANDLER ====================
 
 io.on('connection', (socket) => {
-    // console.log('🔗 New client connected:', socket.id);
-    socket.join('community_chat');
+    // 1. Authenticate Socket
+    const token = socket.handshake.auth.token;
+    let user = null;
 
-    socket.on('chatMessage', async (msgData) => {
+    if (token) {
         try {
+            user = jwt.verify(token, JWT_SECRET);
+            socket.join(user.id); // Join private room (Self)
+            socket.join('community_chat'); // Join public room
+            // console.log(`✅ User ${user.name} connected to socket`);
+        } catch (err) {
+            console.log('❌ Socket Auth Failed');
+        }
+    }
+
+    // 2. Handle Messages
+    socket.on('chatMessage', async (msgData) => {
+        if (!user) return; // Guard
+
+        try {
+            const { content, receiverId } = msgData;
+
             const newMessage = new Message({
-                senderId: msgData.senderId,
-                senderName: msgData.senderName,
-                content: msgData.content
+                senderId: user.id,
+                senderName: user.name,
+                receiverId: receiverId || null,
+                content: content
             });
             await newMessage.save();
 
-            io.to('community_chat').emit('message', {
+            const payload = {
                 senderId: newMessage.senderId,
                 senderName: newMessage.senderName,
+                receiverId: newMessage.receiverId,
                 content: newMessage.content,
                 createdAt: newMessage.createdAt
-            });
+            };
+
+            if (receiverId) {
+                // Private: Emit to Sender AND Receiver
+                io.to(receiverId).emit('private_message', payload); // To Partner
+                socket.emit('private_message', payload); // Send back to self for UI update
+            } else {
+                // Public: Emit to everyone in community
+                io.to('community_chat').emit('message', payload);
+            }
+
         } catch (err) {
             console.error('Socket error:', err);
         }
+    });
+
+    socket.on('disconnect', () => {
+        // console.log('Client disconnected:', socket.id);
     });
 });
 
