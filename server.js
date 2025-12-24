@@ -1,11 +1,15 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
+const { Server } = require("socket.io");
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'apartment-management-secret-key-2024';
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -30,6 +34,15 @@ const AnnouncementSchema = new mongoose.Schema({
 });
 
 const Announcement = mongoose.model('Announcement', AnnouncementSchema);
+
+const MessageSchema = new mongoose.Schema({
+    senderId: { type: String, required: true },
+    senderName: { type: String, required: true },
+    content: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const Message = mongoose.model('Message', MessageSchema);
 
 // Get all announcements (Public for authenticated users)
 app.get('/api/announcements', authenticateToken, async (req, res) => {
@@ -1114,8 +1127,46 @@ app.post('/api/system/reset', authenticateToken, async (req, res) => {
     }
 });
 
+// ==================== CHAT ROUTES ====================
+
+app.get('/api/messages', authenticateToken, async (req, res) => {
+    try {
+        const messages = await Message.find().sort({ createdAt: 1 }).limit(100);
+        res.json({ success: true, data: messages });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Lỗi lấy tin nhắn' });
+    }
+});
+
+// ==================== REALTIME SOCKET HANDLER ====================
+
+io.on('connection', (socket) => {
+    // console.log('🔗 New client connected:', socket.id);
+    socket.join('community_chat');
+
+    socket.on('chatMessage', async (msgData) => {
+        try {
+            const newMessage = new Message({
+                senderId: msgData.senderId,
+                senderName: msgData.senderName,
+                content: msgData.content
+            });
+            await newMessage.save();
+
+            io.to('community_chat').emit('message', {
+                senderId: newMessage.senderId,
+                senderName: newMessage.senderName,
+                content: newMessage.content,
+                createdAt: newMessage.createdAt
+            });
+        } catch (err) {
+            console.error('Socket error:', err);
+        }
+    });
+});
+
 // ==================== START SERVER ====================
 
-app.listen(PORT, () => {
-    console.log(`🚀 Server is running on http://localhost:${PORT}`);
+server.listen(PORT, () => {
+    console.log(`🚀 Server (with Socket.io) is running on http://localhost:${PORT}`);
 });
